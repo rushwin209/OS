@@ -892,3 +892,303 @@ int main() {
 
     return 0;
 }
+Paging OPtimal
+----------------------------------------------------------
+#include <stdio.h>
+
+int main() {
+    // n: length of reference string, f: number of frames
+    // i, j, k: counters, fault: total page misses
+    int n, f, i, j, k, fault = 0;
+
+    printf("Enter number of frames: ");
+    scanf("%d", &f);
+
+    printf("Enter number of pages in reference string: ");
+    scanf("%d", &n);
+
+    // frames[]: current pages in RAM
+    // ref[]: the incoming page request sequence
+    int frames[f], ref[n];
+
+    printf("Enter the reference string: ");
+    for (i = 0; i < n; i++) {
+        scanf("%d", &ref[i]);
+    }
+
+    // Initializing frames to -1 (empty)
+    for (i = 0; i < f; i++) {
+        frames[i] = -1;
+    }
+
+    printf("\nString | Frame Contents | Status");
+    printf("\n--------------------------------");
+
+    for (i = 0; i < n; i++) {
+        int flag1 = 0, flag2 = 0;
+
+        // Check if current page is already in a frame (Hit)
+        for (j = 0; j < f; j++) {
+            if (frames[j] == ref[i]) {
+                flag1 = flag2 = 1;
+                break;
+            }
+        }
+
+        // If Miss, check if there is an empty frame
+        if (flag1 == 0) {
+            for (j = 0; j < f; j++) {
+                if (frames[j] == -1) {
+                    fault++;
+                    frames[j] = ref[i];
+                    flag2 = 1;
+                    break;
+                }
+            }
+        }
+
+        // If Miss and frames are full: Optimal Replacement Logic
+        if (flag2 == 0) {
+            fault++;
+            int pos = -1, furthest = i + 1;
+
+            // For each frame, look into the future to see when it will be used again
+            for (j = 0; j < f; j++) {
+                int next_use = -1;
+                for (k = i + 1; k < n; k++) {
+                    if (frames[j] == ref[k]) {
+                        next_use = k;
+                        break;
+                    }
+                }
+
+                // If a page in the frame is NEVER used again, replace it immediately
+                if (next_use == -1) {
+                    pos = j;
+                    break;
+                }
+
+                // Otherwise, keep track of which page is used furthest in the future
+                if (next_use > furthest) {
+                    furthest = next_use;
+                    pos = j;
+                }
+            }
+            
+            // If all future uses are tied or not found, default to replacing the first frame
+            if (pos == -1) pos = 0;
+            
+            frames[pos] = ref[i];
+        }
+
+        // Display current frames
+        printf("\n  %d    |", ref[i]);
+        for (j = 0; j < f; j++) {
+            if (frames[j] != -1) printf(" %d", frames[j]);
+            else printf(" -");
+        }
+        if (flag1 == 1) printf(" | Hit");
+        else printf(" | Fault");
+    }
+
+    printf("\n\nTotal Page Faults: %d\n", fault);
+
+    return 0;
+}
+IPC pipes
+-------------------------------------------------------------------------------------
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <string.h>
+#include <stdlib.h>
+
+int main() {
+    // fd[2]: File descriptors array. 
+    // fd[0] is for READING, fd[1] is for WRITING
+    int fd[2];
+    
+    // pid: To store the process ID after forking
+    pid_t pid;
+    
+    // write_msg: The data we want to send
+    // read_msg: The buffer to hold data received from the pipe
+    char write_msg[100] = "Hello from the Parent process!";
+    char read_msg[100];
+
+    // pipe(fd): System call to create the pipe. 
+    // It returns 0 on success and -1 on failure.
+    if (pipe(fd) == -1) {
+        fprintf(stderr, "Pipe failed");
+        return 1;
+    }
+
+    // fork(): Creates a child process. 
+    // It returns the child's PID to the parent and 0 to the child.
+    pid = fork();
+
+    if (pid < 0) { // Error handling for fork
+        fprintf(stderr, "Fork failed");
+        return 1;
+    }
+
+    if (pid > 0) { 
+        // --- PARENT PROCESS (Writer) ---
+        
+        // Always close the end of the pipe you are not using.
+        // Parent writes, so we close the READ end (fd[0]).
+        close(fd[0]);
+
+        // write(): Writes the message into the pipe's buffer.
+        // strlen(write_msg) + 1 includes the null terminator '\0'
+        write(fd[1], write_msg, strlen(write_msg) + 1);
+
+        // Close the WRITE end after finishing.
+        close(fd[1]);
+        printf("Parent: Message sent to pipe.\n");
+    } 
+    else {
+        // --- CHILD PROCESS (Reader) ---
+        
+        // Child reads, so we close the unused WRITE end (fd[1]).
+        close(fd[1]);
+
+        // read(): Suspends child until data is available in the pipe.
+        // It reads from fd[0] and stores it in read_msg.
+        read(fd[0], read_msg, sizeof(read_msg));
+
+        printf("Child: Received message: %s\n", read_msg);
+
+        // Close the READ end after finishing.
+        close(fd[0]);
+    }
+
+    return 0;
+}
+IPC FIFO
+------------------------------------------------------
+#include <stdio.h>
+#include <string.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+int main() {
+    // fd: File descriptor for the FIFO file
+    int fd;
+
+    // myfifo: The path to the named pipe file in the file system
+    char *myfifo = "/tmp/myfifo";
+
+    // mkfifo: Creates the named pipe. 
+    // 0666: Permissions (Owner, Group, Others can Read/Write)
+    mkfifo(myfifo, 0666);
+
+    char arr1[80], arr2[80];
+    
+    // fork() to simulate two different processes using the same FIFO
+    pid_t pid = fork();
+
+    if (pid > 0) {
+        // --- WRITER PROCESS ---
+        
+        // Open the FIFO for Write only
+        fd = open(myfifo, O_WRONLY);
+
+        printf("Writer: Enter the message: ");
+        fgets(arr2, 80, stdin);
+
+        // write(): Sends the string into the FIFO file
+        write(fd, arr2, strlen(arr2) + 1);
+        
+        close(fd);
+        printf("Writer: Data sent to FIFO.\n");
+    } 
+    else {
+        // --- READER PROCESS ---
+        
+        // Open the FIFO for Read only. 
+        // Note: open() will block here until the Writer also opens the file.
+        fd = open(myfifo, O_RDONLY);
+
+        // read(): Retrieves data from the FIFO
+        read(fd, arr1, sizeof(arr1));
+
+        // Print the read string
+        printf("Reader: Received message: %s", arr1);
+        
+        close(fd);
+
+        // unlink(): Deletes the FIFO file from the system after use
+        unlink(myfifo);
+    }
+
+    return 0;
+}
+IPC message Queues
+-----------------------------------------------------------
+#include <stdio.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+// struct msg_buffer: The standard structure required for message queues
+// The first member MUST be a long (mtype) to specify message priority/category
+struct msg_buffer {
+    long msg_type;
+    char msg_text[100];
+} message;
+
+int main() {
+    key_t key;
+    int msgid;
+
+    // ftok: File to Key. It creates a unique key based on an existing file 
+    // and a project ID ('a'). Both processes must use the same key.
+    key = ftok("progfile", 'a');
+
+    // msgget: Creates a message queue and returns the identifier
+    // 0666: Permissions, IPC_CREAT: Create queue if it doesn't exist
+    msgid = msgget(key, 0666 | IPC_CREAT);
+
+    if (fork() > 0) {
+        // --- SENDER PROCESS ---
+        
+        // mtype must be greater than 0
+        message.msg_type = 1; 
+
+        printf("Sender: Enter a message to put in queue: ");
+        fgets(message.msg_text, 100, stdin);
+
+        // msgsnd: Sends the message to the queue.
+        // The size excludes the long mtype (sizeof(message) - sizeof(long))
+        msgsnd(msgid, &message, sizeof(message.msg_text), 0);
+
+        printf("Sender: Message sent.\n");
+        
+        // Wait a moment for child to receive before exiting
+        sleep(1); 
+    } 
+    else {
+        // --- RECEIVER PROCESS ---
+        
+        // Sleep to ensure sender has put something in the queue
+        sleep(1);
+
+        // msgrcv: Receives the message from the queue.
+        // The '1' signifies we want to read messages of type 1.
+        msgrcv(msgid, &message, sizeof(message.msg_text), 1, 0);
+
+        printf("Receiver: Processed Data: %s", message.msg_text);
+
+        // msgctl: Message Control. 
+        // IPC_RMID: Removes the queue from the kernel immediately.
+        msgctl(msgid, IPC_RMID, NULL);
+        printf("Receiver: Queue destroyed.\n");
+    }
+
+    return 0;
+}
